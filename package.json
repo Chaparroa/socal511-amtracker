@@ -1,0 +1,8 @@
+{
+  "name": "socal511-amtracker",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "amtrak": "^3.0.13"
+  }
+}

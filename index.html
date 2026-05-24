@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoCal 511 · Amtracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://use.typekit.net/sig7rgp.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --black:      #0A0A0A;
+      --near-black: #111111;
+      --accent:     #1C2A54;
+      --yellow:     #FFD166;
+      --red:        #E8313F;
+      --amtrak-blue: #0077C8;
+      --muted:      #6B7280;
+      --border:     #E5E7EB;
+      --surface:    #F9FAFB;
+    }
+
+    html { scroll-padding-top: 60px; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--near-black);
+      color: #fff;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--black);
+      border-bottom: 3px solid var(--yellow);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .wordmark {
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.08em;
+      color: var(--yellow);
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+
+    .wordmark span {
+      color: #fff;
+      font-weight: 400;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      background: var(--accent);
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-family: 'interstate-compressed', sans-serif;
+      font-weight: 700;
+      font-size: clamp(36px, 8vw, 64px);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #fff;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+
+    .hero p {
+      font-size: 16px;
+      color: rgba(255,255,255,0.7);
+      max-width: 480px;
+      margin: 0 auto 32px;
+    }
+
+    /* ── Search ── */
+    .search-wrap {
+      display: flex;
+      gap: 8px;
+      max-width: 400px;
+      margin: 0 auto;
+    }
+
+    .search-wrap input {
+      flex: 1;
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 2px solid transparent;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 16px;
+    }
+
+    .search-wrap input::placeholder { color: rgba(255,255,255,0.45); }
+
+    .search-wrap input:focus-visible {
+      outline: none;
+      border-color: var(--yellow);
+    }
+
+    .search-wrap button {
+      padding: 12px 20px;
+      background: var(--yellow);
+      color: var(--black);
+      border: none;
+      border-radius: 8px;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      min-height: 44px;
+    }
+
+    .search-wrap button:hover { background: #ffc933; }
+
+    /* ── Content ── */
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    /* ── My Train card ── */
+    .section-label {
+      font-family: 'interstate', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .train-card {
+      background: #1A1A1A;
+      border: 1px solid #2A2A2A;
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      text-decoration: none;
+      color: #fff;
+      transition: border-color 0.15s, background 0.15s;
+      margin-bottom: 12px;
+    }
+
+    .train-card:hover {
+      border-color: var(--amtrak-blue);
+      background: #1E2530;
+    }
+
+    .train-badge {
+      background: var(--amtrak-blue);
+      color: #fff;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      border-radius: 8px;
+      width: 56px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .train-info h3 {
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 17px;
+      margin-bottom: 2px;
+    }
+
+    .train-info p {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .train-card .arrow {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 20px;
+    }
+
+    /* ── Search form ── */
+    .lookup-form {
+      margin-top: 32px;
+    }
+
+    .lookup-form label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .lookup-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .lookup-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #2A2A2A;
+      background: #1A1A1A;
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+    }
+
+    .lookup-row input:focus-visible {
+      outline: none;
+      border-color: var(--amtrak-blue);
+    }
+
+    .lookup-row button {
+      padding: 10px 18px;
+      background: var(--amtrak-blue);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      min-height: 44px;
+    }
+
+    .lookup-row button:hover { background: #005fa3; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 4px solid var(--yellow);
+      background: var(--black);
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="/">SoCal 511 <span>·</span> Amtracker</a>
+</header>
+
+<section class="hero">
+  <h1>Amtracker</h1>
+  <p>Real-time Amtrak train status, position, and delay alerts — all on one screen.</p>
+</section>
+
+<main>
+
+  <p class="section-label">My Morning Train</p>
+  <a class="train-card" href="/train/770?station=CWT">
+    <div class="train-badge">770</div>
+    <div class="train-info">
+      <h3>Train 770</h3>
+      <p>Chatsworth (CWT) → Los Angeles</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <div class="lookup-form">
+    <p class="section-label">Look Up Another Train</p>
+    <label for="train-input">Enter train number</label>
+    <div class="lookup-row">
+      <input id="train-input" type="text" inputmode="numeric" placeholder="e.g. 770" maxlength="4" />
+      <button id="go-btn">Go</button>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <p>Data from Amtrak · Unofficial tracker · Not affiliated with Amtrak</p>
+  <p style="margin-top:6px"><a href="https://socal511-transit.vercel.app">SoCal 511 Transit</a> · SoCal 511 Amtracker</p>
+</footer>
+
+<script>
+  const input = document.getElementById('train-input');
+  const btn   = document.getElementById('go-btn');
+
+  function go() {
+    const num = input.value.trim();
+    if (!num) return;
+    window.location.href = `/train/${num}`;
+  }
+
+  btn.addEventListener('click', go);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+</script>
+
+</body>
+</html>
