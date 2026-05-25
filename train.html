@@ -285,6 +285,83 @@
     }
 
     #error-msg strong { display: block; color: var(--red); font-size: 16px; margin-bottom: 8px; }
+
+    /* Not-active state (train completed run / not yet departed) */
+    #not-active {
+      display: none;
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 0 16px;
+    }
+
+    .not-active-header {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .not-active-header .train-num {
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 40px;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .not-active-header p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .not-active-header .refresh-note {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #4B5563;
+    }
+
+    .active-trains-label {
+      font-family: 'interstate', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .active-train-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .active-train-row:hover { border-color: var(--amtrak-blue); }
+
+    .active-train-badge {
+      background: var(--amtrak-blue);
+      color: #fff;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 14px;
+      border-radius: 6px;
+      padding: 4px 10px;
+      flex-shrink: 0;
+    }
+
+    .active-train-info { flex: 1; font-size: 13px; }
+    .active-train-info strong { display: block; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -308,9 +385,22 @@
 </div>
 
 <div id="error-msg">
-  <strong id="error-text">Train not found</strong>
-  <p>This train may not be running today, or the train number may be incorrect.</p>
+  <strong id="error-text">Unable to load train data</strong>
+  <p>Something went wrong fetching train data. Please try again.</p>
   <p style="margin-top:12px"><a href="/" style="color:var(--amtrak-blue)">← Back to Amtracker</a></p>
+</div>
+
+<div id="not-active">
+  <div class="not-active-header">
+    <span class="train-num" id="not-active-num">—</span>
+    <p>This train is not currently active.<br>It may have already completed its morning run, or hasn't departed yet.</p>
+    <p class="refresh-note">This page checks every 30 seconds — it will update automatically when the train is active.</p>
+  </div>
+  <p class="active-trains-label" id="active-trains-label" style="display:none;">Currently active at your station</p>
+  <div id="active-trains-list"></div>
+  <p style="margin-top:20px;text-align:center;font-size:13px;color:var(--muted)">
+    <a href="/" style="color:var(--amtrak-blue)">← Back to Amtracker</a>
+  </p>
 </div>
 
 <div class="layout" id="main-layout" style="display:none; flex:1;">
@@ -521,15 +611,57 @@
   // ── Fetch ─────────────────────────────────────────────────────
   let staleTimer = null;
 
+  function showNotActive(data) {
+    document.getElementById('loading').style.display     = 'none';
+    document.getElementById('main-layout').style.display = 'none';
+    document.getElementById('error-msg').style.display   = 'none';
+    document.getElementById('not-active').style.display  = 'block';
+    document.getElementById('not-active-num').textContent = `Train ${trainNumber}`;
+    document.getElementById('last-updated').textContent =
+      `Checked ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}`;
+
+    const st = data.stationTrains;
+    if (st && st.trains && st.trains.length > 0) {
+      const label = document.getElementById('active-trains-label');
+      const list  = document.getElementById('active-trains-list');
+      label.style.display = 'block';
+      list.innerHTML = '';
+
+      // stationTrains.trains is an array of train-number strings like ["777-24", "782-24"]
+      st.trains.slice(0, 6).forEach(entry => {
+        const num = entry.split('-')[0];
+        const row = document.createElement('a');
+        row.className = 'active-train-row';
+        row.href = `/train/${num}${focusStation ? '?station=' + focusStation : ''}`;
+        row.innerHTML = `
+          <span class="active-train-badge">${num}</span>
+          <span class="active-train-info">
+            <strong>Train ${num}</strong>
+            Pacific Surfliner · ${st.name || focusStation}
+          </span>
+          <span style="color:var(--muted)">›</span>`;
+        list.appendChild(row);
+      });
+    }
+  }
+
   async function fetchData() {
     try {
-      const res  = await fetch(`/api/train?number=${encodeURIComponent(trainNumber)}`);
+      const url = `/api/train?number=${encodeURIComponent(trainNumber)}${focusStation ? '&station=' + encodeURIComponent(focusStation) : ''}`;
+      const res  = await fetch(url);
       const data = await res.json();
+
+      if (data.notActive) {
+        showNotActive(data);
+        return;
+      }
 
       if (!res.ok || !data.trains || data.trains.length === 0) {
         throw new Error(data.error || 'Train not found');
       }
 
+      // Train is active — hide not-active state if we were showing it
+      document.getElementById('not-active').style.display = 'none';
       render(data);
 
       // Mark stale if no new data for 90s
