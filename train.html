@@ -251,7 +251,7 @@
 
     /* ── Map ── */
     #map {
-      background: #1a1a2e;
+      background: #e8e0d8;
     }
 
     /* ── Loading / Error states ── */
@@ -428,6 +428,8 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
+  import { STATION_COORDS } from '/js/config.js';
+
   // ── Parse URL ──────────────────────────────────────────────────
   const pathParts   = window.location.pathname.split('/');
   const trainNumber = pathParts[pathParts.length - 1];
@@ -438,7 +440,7 @@
 
   // ── Map setup ─────────────────────────────────────────────────
   const map = L.map('map', { zoomControl: true }).setView([34.25, -118.5], 9);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap © CARTO',
     subdomains: 'abcd',
     maxZoom: 19,
@@ -457,8 +459,10 @@
     iconAnchor: [24, 12],
   });
 
-  let trainMarker = null;
-  let lastPos     = null;
+  let trainMarker    = null;
+  let lastPos        = null;
+  let routeLine      = null;
+  let stationDots    = [];
 
   // ── Helpers ───────────────────────────────────────────────────
   function fmtTime(iso) {
@@ -581,7 +585,38 @@
       list.appendChild(row);
     });
 
-    // Map: train position
+    // Map: route line + station dots
+    const routeCoords = stations
+      .map(s => STATION_COORDS[s.code])
+      .filter(Boolean);
+
+    if (routeCoords.length >= 2) {
+      if (routeLine) routeLine.setLatLngs(routeCoords);
+      else routeLine = L.polyline(routeCoords, {
+        color: '#0077C8', weight: 4, opacity: 0.55,
+      }).addTo(map);
+    }
+
+    // Clear old station dots and redraw
+    stationDots.forEach(d => map.removeLayer(d));
+    stationDots = [];
+    stations.forEach(stop => {
+      const coord = STATION_COORDS[stop.code];
+      if (!coord) return;
+      const isMyStop = stop.code === focusStation;
+      const passed   = stop.status === 'Departed' || stop.status === 'Arrived';
+      const dot = L.circleMarker(coord, {
+        radius:      isMyStop ? 7 : 4,
+        color:       isMyStop ? '#1C2A54' : '#0077C8',
+        fillColor:   isMyStop ? '#FFD166' : passed ? '#9CA3AF' : '#fff',
+        fillOpacity: 1,
+        weight:      isMyStop ? 2.5 : 1.5,
+      }).addTo(map);
+      dot.bindTooltip(stop.name || stop.code, { direction: 'top', offset: [0, -6] });
+      stationDots.push(dot);
+    });
+
+    // Map: train position marker
     if (train.lat && train.lon) {
       const pos = [train.lat, train.lon];
       if (trainMarker) {
@@ -595,7 +630,6 @@
       }
       lastPos = pos;
 
-      // Tooltip
       const speed = train.velocity ? `${Math.round(train.velocity)} mph` : '';
       trainMarker.bindTooltip(
         `<strong>Train ${trainNumber}</strong>${speed ? ` · ${speed}` : ''}`,
