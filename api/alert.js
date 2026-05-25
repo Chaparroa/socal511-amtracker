@@ -56,7 +56,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const trains = await fetchTrain(TRAIN_NUMBER);
+    const raw = await fetchTrain(TRAIN_NUMBER);
+    // amtraker v3 returns { trainNum: [trainObj, ...] }, not a plain array
+    const trains = Array.isArray(raw) ? raw : raw ? Object.values(raw).flat() : [];
 
     if (!trains || trains.length === 0) {
       return res.json({ status: 'not_active', message: `Train ${TRAIN_NUMBER} not currently running` });
@@ -68,12 +70,12 @@ export default async function handler(req, res) {
 
     // Calculate delay at our station
     let delay = 0;
-    if (myStop?.estArr && myStop?.schArr) {
-      delay = Math.round((new Date(myStop.estArr) - new Date(myStop.schArr)) / 60000);
+    if (myStop?.arr && myStop?.schArr) {
+      delay = Math.round((new Date(myStop.arr) - new Date(myStop.schArr)) / 60000);
     } else {
       // Fall back to overall train delay from last reported station
-      const last = [...stations].reverse().find(s => s.estArr && s.schArr);
-      if (last) delay = Math.round((new Date(last.estArr) - new Date(last.schArr)) / 60000);
+      const last = [...stations].reverse().find(s => s.arr && s.schArr);
+      if (last) delay = Math.round((new Date(last.arr) - new Date(last.schArr)) / 60000);
     }
 
     if (delay <= DELAY_MIN) {

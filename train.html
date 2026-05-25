@@ -492,9 +492,9 @@
       : null;
 
     // Determine overall delay from last reported station
-    const lastStation = [...stations].reverse().find(s => s.estArr || s.estDep);
+    const lastStation = [...stations].reverse().find(s => s.arr || s.dep);
     const overallDelay = lastStation
-      ? Math.max(delayMin(lastStation.estArr, lastStation.schArr), delayMin(lastStation.estDep, lastStation.schDep))
+      ? Math.max(delayMin(lastStation.arr, lastStation.schArr), delayMin(lastStation.dep, lastStation.schDep))
       : 0;
 
     const pill   = document.getElementById('status-pill');
@@ -529,13 +529,13 @@
       document.getElementById('my-station-name').textContent =
         myStop.name ? `${myStop.name} (${myStop.code})` : myStop.code;
 
-      const delay = delayMin(myStop.estArr, myStop.schArr);
+      const delay = delayMin(myStop.arr, myStop.schArr);
       const schedEl = document.getElementById('sched-time');
       const estEl   = document.getElementById('est-time');
       const delayEl = document.getElementById('delay-note');
 
       schedEl.textContent = fmtTime(myStop.schArr);
-      estEl.textContent   = fmtTime(myStop.estArr) || fmtTime(myStop.schArr);
+      estEl.textContent   = fmtTime(myStop.arr) || fmtTime(myStop.schArr);
 
       if (delay > 5) {
         estEl.className = 'time-val delayed';
@@ -552,8 +552,8 @@
     list.innerHTML = '';
 
     stations.forEach(stop => {
-      const delay  = delayMin(stop.estArr, stop.schArr);
-      const passed = stop.postdep === true || stop.postarr === true;
+      const delay  = delayMin(stop.arr, stop.schArr);
+      const passed = stop.status === 'Departed' || stop.status === 'Arrived';
       const isMyStop = stop.code === focusStation;
 
       const row = document.createElement('div');
@@ -570,7 +570,7 @@
         <div class="stop-code">${stop.code}</div>`;
 
       const timeWrap = document.createElement('div');
-      const displayTime = fmtTime(stop.estArr || stop.schArr);
+      const displayTime = fmtTime(stop.arr || stop.schArr);
       timeWrap.innerHTML = `<div class="stop-time">${displayTime}</div>
         ${delay > 5 ? `<div class="stop-delay">+${delay} min</div>` : ''}`;
 

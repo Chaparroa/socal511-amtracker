@@ -12,7 +12,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const trains = await fetchTrain(number);
+    const raw = await fetchTrain(number);
+    // amtraker v3 returns { trainNum: [trainObj, ...] }, not a plain array
+    const trains = Array.isArray(raw) ? raw : raw ? Object.values(raw).flat() : [];
 
     if (!trains || trains.length === 0) {
       // Train not active — fetch station context if a station code was provided
