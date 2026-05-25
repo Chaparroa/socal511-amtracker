@@ -477,6 +477,7 @@
   function render(data) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('main-layout').style.display = '';
+    map.invalidateSize();
 
     // Pick first train (same number may run as multiple consists on same day)
     const train = data.trains[0];
