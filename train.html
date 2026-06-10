@@ -71,8 +71,36 @@
       margin-left: 8px;
     }
 
-    #last-updated {
+    .header-right {
       margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #notify-btn {
+      display: none; /* shown by JS when push is supported */
+      align-items: center;
+      background: none;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      padding: 5px 8px;
+      transition: color 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+
+    #notify-btn.active {
+      color: var(--yellow);
+      border-color: var(--yellow);
+    }
+
+    #notify-btn:active { opacity: 0.65; }
+
+    #last-updated {
       font-size: 12px;
       color: var(--muted);
     }
@@ -132,8 +160,10 @@
     @media (max-width: 700px) {
       .layout {
         grid-template-columns: 1fr;
-        grid-template-rows: auto 320px;
+        grid-template-rows: min(280px, 40vh) auto;
       }
+      #map    { order: -1; }
+      .sidebar { order: 0; }
     }
 
     /* ── Sidebar ── */
@@ -369,7 +399,10 @@
 <header>
   <a class="wordmark" href="/">SoCal 511 <span>·</span> Amtracker</a>
   <span id="train-title">—</span>
-  <span id="last-updated">Loading…</span>
+  <div class="header-right">
+    <button id="notify-btn" title="Tap to get delay alerts" aria-label="Enable delay notifications">🔔</button>
+    <span id="last-updated">Loading…</span>
+  </div>
 </header>
 
 <div id="alert-band"></div>
@@ -716,6 +749,71 @@
 
   fetchData();
   setInterval(fetchData, 30_000);
+
+  // ── Push Notifications ─────────────────────────────────────────
+  const notifyBtn = document.getElementById('notify-btn');
+
+  function urlB64ToUint8(b64) {
+    const pad = '='.repeat((4 - b64.length % 4) % 4);
+    const str = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(str, c => c.charCodeAt(0));
+  }
+
+  function setNotifyState(active) {
+    notifyBtn.textContent = active ? '🔔' : '🔕';
+    notifyBtn.title       = active ? 'Notifications on — tap to disable' : 'Tap to get delay alerts';
+    notifyBtn.setAttribute('aria-label', active ? 'Disable delay notifications' : 'Enable delay notifications');
+    notifyBtn.classList.toggle('active', active);
+  }
+
+  async function initNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    const reg      = await navigator.serviceWorker.register('/sw.js');
+    const existing = await reg.pushManager.getSubscription();
+    notifyBtn.style.display = 'flex';
+    setNotifyState(!!existing);
+
+    notifyBtn.addEventListener('click', async () => {
+      const isActive = notifyBtn.classList.contains('active');
+
+      if (isActive) {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+        await fetch('/api/subscribe', { method: 'DELETE' });
+        setNotifyState(false);
+        return;
+      }
+
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        alert('Notifications are blocked. Enable them in your browser/OS settings to get delay alerts.');
+        return;
+      }
+
+      const keyRes = await fetch('/api/push-key');
+      if (!keyRes.ok) {
+        alert('Notification service not yet configured. Check back soon.');
+        return;
+      }
+      const { key } = await keyRes.json();
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8(key),
+      });
+
+      await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+
+      setNotifyState(true);
+    });
+  }
+
+  initNotifications();
 </script>
 
 </body>

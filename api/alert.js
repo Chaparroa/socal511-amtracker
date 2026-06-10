@@ -1,19 +1,20 @@
-// Checks train 770 status and sends an SMS via Twilio if it's delayed.
-// Intended to be called by an external cron job (cron-job.org) every 10 min
-// during the morning window. Deduplicates via /tmp state so only one SMS
-// is sent per delay event, with a follow-up only if delay worsens by 10+ min.
+// Checks train 770 status and sends alerts (web push and/or SMS) if it's delayed.
+// Called by cron-job.org every 10 min during the morning window.
+// Deduplicates via /tmp state — one alert per delay event, re-alerts if delay worsens 10+ min.
 import { fetchTrain } from 'amtrak';
+import webpush       from 'web-push';
 import { readFileSync, writeFileSync } from 'fs';
 
-const TRAIN_NUMBER   = '770';
-const STATION_CODE   = 'CWT';
-const STATION_NAME   = 'Chatsworth';
-const TRACKER_URL    = 'https://socal511-amtracker.vercel.app/train/770?station=CWT';
-const DELAY_MIN      = 5;    // minutes late before alerting
-const COOLDOWN_MS    = 45 * 60 * 1000; // don't re-alert within 45 min unless delay worsens
-const WORSEN_MIN     = 10;   // re-alert if delay grows by this much
-const STATE_FILE     = '/tmp/amtracker-state.json';
+const TRAIN_NUMBER = '770';
+const STATION_CODE = 'CWT';
+const STATION_NAME = 'Chatsworth';
+const TRACKER_URL  = 'https://socal511-amtracker.vercel.app/train/770?station=CWT';
+const DELAY_MIN    = 5;
+const COOLDOWN_MS  = 45 * 60 * 1000;
+const WORSEN_MIN   = 10;
+const STATE_FILE   = '/tmp/amtracker-state.json';
 
+// ── State (dedup) ─────────────────────────────────────────────────
 function loadState() {
   try { return JSON.parse(readFileSync(STATE_FILE, 'utf8')); }
   catch { return null; }
@@ -21,35 +22,70 @@ function loadState() {
 
 function saveState(state) {
   try { writeFileSync(STATE_FILE, JSON.stringify(state)); }
-  catch { /* /tmp write failure is non-fatal */ }
+  catch { /* non-fatal */ }
 }
 
-async function sendSMS(message) {
-  const sid   = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  const from  = process.env.TWILIO_FROM;
-  const to    = process.env.ALERT_TO;
+// ── Upstash Redis (push subscription storage) ─────────────────────
+async function redis(cmd, ...args) {
+  const r = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify([cmd, ...args]),
+  });
+  const { result } = await r.json();
+  return result;
+}
 
-  if (!sid || !token || !from || !to) {
-    throw new Error('Missing Twilio env vars (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, ALERT_TO)');
+// ── Web Push ──────────────────────────────────────────────────────
+async function sendPush(title, body) {
+  const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, UPSTASH_REDIS_REST_URL } = process.env;
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !UPSTASH_REDIS_REST_URL) return null;
+
+  const raw = await redis('GET', 'push:subscription');
+  if (!raw) return { skipped: 'no subscription stored' };
+
+  const subscription = JSON.parse(raw);
+  webpush.setVapidDetails('mailto:achaparro41@gmail.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+  try {
+    await webpush.sendNotification(
+      subscription,
+      JSON.stringify({ title, body, url: TRACKER_URL })
+    );
+    return { sent: true };
+  } catch (err) {
+    if (err.statusCode === 410) {
+      // Subscription expired — clean up so it doesn't keep failing
+      await redis('DEL', 'push:subscription');
+      return { skipped: 'subscription expired, removed from store' };
+    }
+    throw err;
   }
+}
+
+// ── SMS (Twilio) ──────────────────────────────────────────────────
+async function sendSMS(message) {
+  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: token, TWILIO_FROM: from, ALERT_TO: to } = process.env;
+  if (!sid || !token || !from || !to) return null;
 
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
   const r = await fetch(
     `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
     {
-      method:  'POST',
+      method: 'POST',
       headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams({ To: to, From: from, Body: message }).toString(),
+      body: new URLSearchParams({ To: to, From: from, Body: message }).toString(),
     }
   );
-
   if (!r.ok) throw new Error(`Twilio ${r.status}: ${await r.text()}`);
-  return r.json();
+  return { sent: true };
 }
 
+// ── Handler ───────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  // Optional secret key — set ALERT_SECRET in Vercel env vars and pass ?key=... in the cron URL
   const secret = process.env.ALERT_SECRET;
   if (secret && req.query.key !== secret) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -57,7 +93,6 @@ export default async function handler(req, res) {
 
   try {
     const raw = await fetchTrain(TRAIN_NUMBER);
-    // amtraker v3 returns { trainNum: [trainObj, ...] }, not a plain array
     const trains = Array.isArray(raw) ? raw : raw ? Object.values(raw).flat() : [];
 
     if (!trains || trains.length === 0) {
@@ -68,12 +103,10 @@ export default async function handler(req, res) {
     const stations = train.stations || [];
     const myStop   = stations.find(s => s.code === STATION_CODE);
 
-    // Calculate delay at our station
     let delay = 0;
     if (myStop?.arr && myStop?.schArr) {
       delay = Math.round((new Date(myStop.arr) - new Date(myStop.schArr)) / 60000);
     } else {
-      // Fall back to overall train delay from last reported station
       const last = [...stations].reverse().find(s => s.arr && s.schArr);
       if (last) delay = Math.round((new Date(last.arr) - new Date(last.schArr)) / 60000);
     }
@@ -82,13 +115,12 @@ export default async function handler(req, res) {
       return res.json({ status: 'on_time', delay, message: 'Train on time — no alert needed' });
     }
 
-    // Dedup: skip if we already alerted recently and delay hasn't significantly worsened
     const state = loadState();
     const now   = Date.now();
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); // YYYY-MM-DD
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 
     if (state && state.date === today) {
-      const tooSoon     = (now - state.sentAt) < COOLDOWN_MS;
+      const tooSoon      = (now - state.sentAt) < COOLDOWN_MS;
       const notMuchWorse = delay < state.delay + WORSEN_MIN;
       if (tooSoon && notMuchWorse) {
         return res.json({
@@ -100,17 +132,24 @@ export default async function handler(req, res) {
       }
     }
 
-    // Build SMS
-    const statusMsg  = train.statusMsg ? ` (${train.statusMsg})` : '';
-    const message =
-      `Train ${TRAIN_NUMBER} is running ${delay} min late${statusMsg}.\n` +
-      `Your stop: ${STATION_NAME}\n` +
-      `Track live: ${TRACKER_URL}`;
+    const statusMsg   = train.statusMsg ? ` (${train.statusMsg})` : '';
+    const title       = `Train ${TRAIN_NUMBER} — ${delay} min delay`;
+    const body        = `Running ${delay} min late${statusMsg}. Your stop: ${STATION_NAME}.`;
+    const smsMessage  = `${body}\nTrack live: ${TRACKER_URL}`;
 
-    await sendSMS(message);
+    const [pushResult, smsResult] = await Promise.allSettled([
+      sendPush(title, body),
+      sendSMS(smsMessage),
+    ]);
+
     saveState({ date: today, sentAt: now, delay });
 
-    return res.json({ status: 'alert_sent', delay, message: `SMS sent — ${delay} min delay` });
+    return res.json({
+      status: 'alert_sent',
+      delay,
+      push: pushResult.status === 'fulfilled' ? pushResult.value : { error: pushResult.reason?.message },
+      sms:  smsResult.status  === 'fulfilled' ? smsResult.value  : { error: smsResult.reason?.message },
+    });
 
   } catch (err) {
     return res.status(502).json({ error: err.message });

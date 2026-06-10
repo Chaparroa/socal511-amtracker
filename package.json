@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "amtrak": "^3.0.13"
+    "amtrak": "^3.0.13",
+    "web-push": "^3.6.0"
   }
 }
