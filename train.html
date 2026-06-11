@@ -216,7 +216,8 @@
     }
 
     #last-updated {
-      font-size: 12px;
+      margin-left: auto;
+      font-size: 11px;
       color: var(--muted);
     }
 
@@ -231,7 +232,7 @@
       font-weight: 700;
       font-size: 13px;
       letter-spacing: 0.04em;
-      padding: 10px 16px;
+      padding: 6px 16px;
       text-align: center;
     }
 
@@ -516,7 +517,6 @@
   <span id="train-title">—</span>
   <div class="header-right">
     <button id="notify-btn" title="Tap to get delay alerts" aria-label="Enable delay notifications">🔔</button>
-    <span id="last-updated">Loading…</span>
   </div>
 </header>
 
@@ -525,6 +525,7 @@
 <div id="status-band">
   <span class="status-pill unknown" id="status-pill">—</span>
   <span id="status-detail">Fetching train data…</span>
+  <span id="last-updated">Loading…</span>
 </div>
 
 <div id="loading">
@@ -577,9 +578,9 @@
 <div class="sheet-overlay" id="sheet-overlay"></div>
 <div class="bottom-sheet" id="notify-sheet" role="dialog" aria-modal="true" aria-label="Enable delay alerts">
   <div class="sheet-handle"></div>
-  <p class="sheet-eyebrow">Delay Alerts</p>
-  <h3 class="sheet-title">Get notified when your train is late</h3>
-  <p class="sheet-subtitle">iPhone requires a quick one-time setup.</p>
+  <p class="sheet-eyebrow">iPhone only</p>
+  <h3 class="sheet-title">Set up alerts on your iPhone</h3>
+  <p class="sheet-subtitle">Apple requires websites to be added to your Home Screen before push notifications can work. It's a one-time setup that takes about 30 seconds.</p>
   <ol class="sheet-steps">
     <li>
       <div class="step-num">1</div>
