@@ -100,6 +100,121 @@
 
     #notify-btn:active { opacity: 0.65; }
 
+    /* ── Bottom sheet (notification onboarding) ── */
+    .sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 300;
+    }
+
+    .bottom-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1E1E1E;
+      border-top: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      padding: 12px 20px 40px;
+      z-index: 301;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+      display: none;
+    }
+
+    .bottom-sheet.open { transform: translateY(0); }
+
+    .sheet-handle {
+      width: 36px;
+      height: 4px;
+      background: #3A3A3A;
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+
+    .sheet-eyebrow {
+      font-family: 'interstate', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--yellow);
+      margin-bottom: 6px;
+    }
+
+    .sheet-title {
+      font-family: 'interstate', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+
+    .sheet-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    .sheet-steps {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+
+    .sheet-steps li {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      background: var(--accent);
+      color: #fff;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 12px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-body strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .step-body span {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .sheet-btn {
+      width: 100%;
+      background: var(--yellow);
+      color: var(--black);
+      border: none;
+      border-radius: 10px;
+      padding: 15px;
+      font-family: 'interstate', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+
     #last-updated {
       font-size: 12px;
       color: var(--muted);
@@ -459,6 +574,45 @@
   <div id="map"></div>
 </div>
 
+<div class="sheet-overlay" id="sheet-overlay"></div>
+<div class="bottom-sheet" id="notify-sheet" role="dialog" aria-modal="true" aria-label="Enable delay alerts">
+  <div class="sheet-handle"></div>
+  <p class="sheet-eyebrow">Delay Alerts</p>
+  <h3 class="sheet-title">Get notified when your train is late</h3>
+  <p class="sheet-subtitle">iPhone requires a quick one-time setup.</p>
+  <ol class="sheet-steps">
+    <li>
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Tap the Share button in Safari</strong>
+        <span>The icon at the bottom of your screen — a box with an arrow pointing up</span>
+      </div>
+    </li>
+    <li>
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Tap "Add to Home Screen"</strong>
+        <span>Scroll down in the share menu if you don't see it right away</span>
+      </div>
+    </li>
+    <li>
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>Open Amtracker from your Home Screen</strong>
+        <span>Tap the new icon that appears on your home screen</span>
+      </div>
+    </li>
+    <li>
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>Tap 🔔 and allow notifications</strong>
+        <span>You'll get a push alert whenever Train 770 is running late</span>
+      </div>
+    </li>
+  </ol>
+  <button class="sheet-btn" id="sheet-close">Got it</button>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { STATION_COORDS } from '/js/config.js';
@@ -751,7 +905,13 @@
   setInterval(fetchData, 30_000);
 
   // ── Push Notifications ─────────────────────────────────────────
-  const notifyBtn = document.getElementById('notify-btn');
+  const notifyBtn   = document.getElementById('notify-btn');
+  const sheetEl     = document.getElementById('notify-sheet');
+  const overlayEl   = document.getElementById('sheet-overlay');
+
+  const isIOS        = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone;
+  const hasPush      = 'serviceWorker' in navigator && 'PushManager' in window;
 
   function urlB64ToUint8(b64) {
     const pad = '='.repeat((4 - b64.length % 4) % 4);
@@ -760,18 +920,44 @@
   }
 
   function setNotifyState(active) {
-    notifyBtn.textContent = active ? '🔔' : '🔕';
+    notifyBtn.textContent = '🔔';
     notifyBtn.title       = active ? 'Notifications on — tap to disable' : 'Tap to get delay alerts';
-    notifyBtn.setAttribute('aria-label', active ? 'Disable delay notifications' : 'Enable delay notifications');
+    notifyBtn.setAttribute('aria-label', active ? 'Disable notifications' : 'Enable delay notifications');
     notifyBtn.classList.toggle('active', active);
   }
 
-  async function initNotifications() {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  function openSheet() {
+    sheetEl.style.display = 'block';
+    overlayEl.style.display = 'block';
+    requestAnimationFrame(() => sheetEl.classList.add('open'));
+  }
 
+  function closeSheet() {
+    sheetEl.classList.remove('open');
+    setTimeout(() => {
+      sheetEl.style.display = 'none';
+      overlayEl.style.display = 'none';
+    }, 300);
+  }
+
+  document.getElementById('sheet-close').addEventListener('click', closeSheet);
+  overlayEl.addEventListener('click', closeSheet);
+
+  async function initNotifications() {
+    // Show bell for iOS (so we can guide them) or any browser with push support
+    if (!hasPush && !isIOS) return;
+    notifyBtn.style.display = 'flex';
+
+    // iOS in regular Safari: bell tapping shows the install guide
+    if (isIOS && !isStandalone) {
+      setNotifyState(false);
+      notifyBtn.addEventListener('click', openSheet);
+      return;
+    }
+
+    // Push is available (iOS PWA or Android/desktop) — normal subscription flow
     const reg      = await navigator.serviceWorker.register('/sw.js');
     const existing = await reg.pushManager.getSubscription();
-    notifyBtn.style.display = 'flex';
     setNotifyState(!!existing);
 
     notifyBtn.addEventListener('click', async () => {
@@ -787,15 +973,12 @@
 
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
-        alert('Notifications are blocked. Enable them in your browser/OS settings to get delay alerts.');
+        alert('Notifications are blocked. Enable them in your browser/OS settings.');
         return;
       }
 
       const keyRes = await fetch('/api/push-key');
-      if (!keyRes.ok) {
-        alert('Notification service not yet configured. Check back soon.');
-        return;
-      }
+      if (!keyRes.ok) { alert('Notification service not yet configured.'); return; }
       const { key } = await keyRes.json();
 
       const sub = await reg.pushManager.subscribe({
