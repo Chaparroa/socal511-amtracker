@@ -660,6 +660,11 @@
     });
   }
 
+  function fmtTimeShort(iso) {
+    if (!iso) return '—';
+    return fmtTime(iso).replace(' AM', '').replace(' PM', '');
+  }
+
   function delayMin(estIso, schIso) {
     if (!estIso || !schIso) return 0;
     return Math.round((new Date(estIso) - new Date(schIso)) / 60000);
@@ -733,7 +738,7 @@
       if (delay > 5) {
         estEl.className = 'time-val delayed';
         delayEl.style.display = 'block';
-        delayEl.textContent   = `Running ${delay} minutes late`;
+        delayEl.textContent   = `running ${delay} min late`;
       } else {
         estEl.className = 'time-val';
         delayEl.style.display = 'none';
@@ -765,7 +770,7 @@
       const timeWrap = document.createElement('div');
       const displayTime = fmtTime(stop.arr || stop.schArr);
       timeWrap.innerHTML = `<div class="stop-time">${displayTime}</div>
-        ${delay > 5 ? `<div class="stop-delay">+${delay} min</div>` : ''}`;
+        ${delay > 5 ? `<div class="stop-delay">was ${fmtTimeShort(stop.schArr)} · ${delay} min late</div>` : ''}`;
 
       row.appendChild(dot);
       row.appendChild(nameWrap);
