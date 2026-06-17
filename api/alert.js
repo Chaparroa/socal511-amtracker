@@ -1,9 +1,8 @@
 // Checks train 770 status and sends alerts (web push and/or SMS) if it's delayed.
-// Called by cron-job.org every 10 min during the morning window.
-// Deduplicates via /tmp state — one alert per delay event, re-alerts if delay worsens 10+ min.
+// Called by cron-job.org on a tiered schedule: every 10 min (7am), every 3 min (8am), every 10 min (9–10am).
+// Deduplicates via Upstash Redis — one alert per delay event, re-alerts if delay worsens 10+ min.
 import { fetchTrain } from 'amtrak';
 import webpush       from 'web-push';
-import { readFileSync, writeFileSync } from 'fs';
 
 const TRAIN_NUMBER = '770';
 const STATION_CODE = 'CWT';
@@ -12,20 +11,24 @@ const TRACKER_URL  = 'https://socal511-amtracker.vercel.app/train/770?station=CW
 const DELAY_MIN    = 5;
 const COOLDOWN_MS  = 45 * 60 * 1000;
 const WORSEN_MIN   = 10;
-const STATE_FILE   = '/tmp/amtracker-state.json';
+const DEDUP_KEY    = 'alert:dedup';
 
-// ── State (dedup) ─────────────────────────────────────────────────
-function loadState() {
-  try { return JSON.parse(readFileSync(STATE_FILE, 'utf8')); }
-  catch { return null; }
+// ── State (dedup via Redis) ───────────────────────────────────────
+async function loadState() {
+  try {
+    const raw = await redis('GET', DEDUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
 }
 
-function saveState(state) {
-  try { writeFileSync(STATE_FILE, JSON.stringify(state)); }
-  catch { /* non-fatal */ }
+async function saveState(state) {
+  try {
+    // Expire at midnight PT so each day starts clean
+    await redis('SET', DEDUP_KEY, JSON.stringify(state), 'EX', 86400);
+  } catch { /* non-fatal */ }
 }
 
-// ── Upstash Redis (push subscription storage) ─────────────────────
+// ── Upstash Redis ─────────────────────────────────────────────────
 async function redis(cmd, ...args) {
   const r = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
     method: 'POST',
@@ -115,7 +118,7 @@ export default async function handler(req, res) {
       return res.json({ status: 'on_time', delay, message: 'Train on time — no alert needed' });
     }
 
-    const state = loadState();
+    const state = await loadState();
     const now   = Date.now();
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 
@@ -142,7 +145,7 @@ export default async function handler(req, res) {
       sendSMS(smsMessage),
     ]);
 
-    saveState({ date: today, sentAt: now, delay });
+    await saveState({ date: today, sentAt: now, delay });
 
     return res.json({
       status: 'alert_sent',

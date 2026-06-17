@@ -967,6 +967,15 @@
     const existing = await reg.pushManager.getSubscription();
     setNotifyState(!!existing);
 
+    // Re-POST subscription to Redis on every load — self-heals if Redis lost it
+    if (existing) {
+      fetch('/api/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(existing),
+      });
+    }
+
     notifyBtn.addEventListener('click', async () => {
       const isActive = notifyBtn.classList.contains('active');
 
