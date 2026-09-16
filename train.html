@@ -690,11 +690,17 @@
       ? stations.find(s => s.code === focusStation)
       : null;
 
-    // Determine overall delay from last reported station
+    // Prefer the delay projected at the rider's own station (most relevant,
+    // and usually more accurate than the last-reported stop since delays
+    // tend to grow en route). Fall back to the last reported station when
+    // there's no focus station (e.g. generic train lookup).
     const lastStation = [...stations].reverse().find(s => s.arr || s.dep);
-    const overallDelay = lastStation
+    const lastStationDelay = lastStation
       ? Math.max(delayMin(lastStation.arr, lastStation.schArr), delayMin(lastStation.dep, lastStation.schDep))
       : 0;
+    const overallDelay = myStop
+      ? delayMin(myStop.arr, myStop.schArr)
+      : lastStationDelay;
 
     const pill   = document.getElementById('status-pill');
     const detail = document.getElementById('status-detail');
