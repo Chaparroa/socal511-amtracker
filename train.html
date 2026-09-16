@@ -1008,11 +1008,19 @@
         applicationServerKey: urlB64ToUint8(key),
       });
 
-      await fetch('/api/subscribe', {
+      const saveRes = await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub),
       });
+
+      if (!saveRes.ok) {
+        // Subscribed in the browser but the server couldn't store it — don't
+        // show "active" or alerts will silently never arrive.
+        await sub.unsubscribe();
+        alert('Could not save notification settings. Please try again.');
+        return;
+      }
 
       setNotifyState(true);
     });

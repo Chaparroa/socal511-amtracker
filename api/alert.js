@@ -1,8 +1,8 @@
-// Checks train 770 status and sends alerts (web push and/or SMS) if it's delayed.
+// Checks train 770 status and sends a web push alert if it's delayed.
 // Called by cron-job.org on a tiered schedule: every 10 min (7am), every 3 min (8am), every 10 min (9–10am).
 // Deduplicates via Upstash Redis — one alert per delay event, re-alerts if delay worsens 10+ min.
 import { fetchTrain } from 'amtrak';
-import webpush       from 'web-push';
+import webpush        from 'web-push';
 
 const TRAIN_NUMBER = '770';
 const STATION_CODE = 'CWT';
@@ -30,10 +30,10 @@ async function saveState(state) {
 
 // ── Upstash Redis ─────────────────────────────────────────────────
 async function redis(cmd, ...args) {
-  const r = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
+  const r = await fetch(process.env.UPSTASH_REDIS_REST_KV_REST_API_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify([cmd, ...args]),
@@ -44,8 +44,8 @@ async function redis(cmd, ...args) {
 
 // ── Web Push ──────────────────────────────────────────────────────
 async function sendPush(title, body) {
-  const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, UPSTASH_REDIS_REST_URL } = process.env;
-  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !UPSTASH_REDIS_REST_URL) return null;
+  const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, UPSTASH_REDIS_REST_KV_REST_API_URL } = process.env;
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !UPSTASH_REDIS_REST_KV_REST_API_URL) return null;
 
   const raw = await redis('GET', 'push:subscription');
   if (!raw) return { skipped: 'no subscription stored' };
@@ -67,24 +67,6 @@ async function sendPush(title, body) {
     }
     throw err;
   }
-}
-
-// ── SMS (Twilio) ──────────────────────────────────────────────────
-async function sendSMS(message) {
-  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: token, TWILIO_FROM: from, ALERT_TO: to } = process.env;
-  if (!sid || !token || !from || !to) return null;
-
-  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
-  const r = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ To: to, From: from, Body: message }).toString(),
-    }
-  );
-  if (!r.ok) throw new Error(`Twilio ${r.status}: ${await r.text()}`);
-  return { sent: true };
 }
 
 // ── Handler ───────────────────────────────────────────────────────
@@ -135,15 +117,16 @@ export default async function handler(req, res) {
       }
     }
 
-    const statusMsg   = train.statusMsg ? ` (${train.statusMsg})` : '';
-    const title       = `Train ${TRAIN_NUMBER} — ${delay} min delay`;
-    const body        = `Running ${delay} min late${statusMsg}. Your stop: ${STATION_NAME}.`;
-    const smsMessage  = `${body}\nTrack live: ${TRACKER_URL}`;
+    const statusMsg = train.statusMsg ? ` (${train.statusMsg})` : '';
+    const title     = `Train ${TRAIN_NUMBER} — ${delay} min delay`;
+    const body      = `Running ${delay} min late${statusMsg}. Your stop: ${STATION_NAME}.`;
 
-    const [pushResult, smsResult] = await Promise.allSettled([
-      sendPush(title, body),
-      sendSMS(smsMessage),
-    ]);
+    let pushResult;
+    try {
+      pushResult = { status: 'fulfilled', value: await sendPush(title, body) };
+    } catch (err) {
+      pushResult = { status: 'rejected', reason: err };
+    }
 
     await saveState({ date: today, sentAt: now, delay });
 
@@ -151,7 +134,6 @@ export default async function handler(req, res) {
       status: 'alert_sent',
       delay,
       push: pushResult.status === 'fulfilled' ? pushResult.value : { error: pushResult.reason?.message },
-      sms:  smsResult.status  === 'fulfilled' ? smsResult.value  : { error: smsResult.reason?.message },
     });
 
   } catch (err) {

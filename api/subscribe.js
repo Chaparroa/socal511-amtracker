@@ -1,8 +1,8 @@
 async function redis(cmd, ...args) {
-  const r = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
+  const r = await fetch(process.env.UPSTASH_REDIS_REST_KV_REST_API_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify([cmd, ...args]),
@@ -12,8 +12,8 @@ async function redis(cmd, ...args) {
 }
 
 export default async function handler(req, res) {
-  if (!process.env.UPSTASH_REDIS_REST_URL) {
-    return res.status(503).json({ error: 'Push storage not configured (UPSTASH_REDIS_REST_URL missing)' });
+  if (!process.env.UPSTASH_REDIS_REST_KV_REST_API_URL) {
+    return res.status(503).json({ error: 'Push storage not configured (UPSTASH_REDIS_REST_KV_REST_API_URL missing)' });
   }
 
   if (req.method === 'POST') {
