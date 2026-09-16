@@ -1,21 +1,13 @@
 async function redis(cmd, ...args) {
-  const url = process.env.UPSTASH_REDIS_REST_KV_REST_API_URL;
-  let r;
-  try {
-    r = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify([cmd, ...args]),
-    });
-  } catch (err) {
-    let shape;
-    try { shape = { hostname: new URL(url).hostname, protocol: new URL(url).protocol, len: url.length }; }
-    catch { shape = { invalidUrl: true, len: url?.length ?? 0, startsWithHttp: /^https?:\/\//.test(url || '') }; }
-    throw new Error(`redis fetch failed: ${err.message} — url shape: ${JSON.stringify(shape)}`);
-  }
+  const r = await fetch(process.env.UPSTASH_REDIS_REST_KV_REST_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify([cmd, ...args]),
+  });
+  if (!r.ok) throw new Error(`Redis REST error ${r.status}`);
   const { result } = await r.json();
   return result;
 }

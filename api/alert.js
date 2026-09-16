@@ -38,6 +38,7 @@ async function redis(cmd, ...args) {
     },
     body: JSON.stringify([cmd, ...args]),
   });
+  if (!r.ok) throw new Error(`Redis REST error ${r.status}`);
   const { result } = await r.json();
   return result;
 }
