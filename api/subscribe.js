@@ -16,17 +16,21 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Push storage not configured (UPSTASH_REDIS_REST_KV_REST_API_URL missing)' });
   }
 
-  if (req.method === 'POST') {
-    const sub = req.body;
-    if (!sub?.endpoint) return res.status(400).json({ error: 'Invalid subscription object' });
-    await redis('SET', 'push:subscription', JSON.stringify(sub));
-    return res.json({ ok: true });
-  }
+  try {
+    if (req.method === 'POST') {
+      const sub = req.body;
+      if (!sub?.endpoint) return res.status(400).json({ error: 'Invalid subscription object' });
+      await redis('SET', 'push:subscription', JSON.stringify(sub));
+      return res.json({ ok: true });
+    }
 
-  if (req.method === 'DELETE') {
-    await redis('DEL', 'push:subscription');
-    return res.json({ ok: true });
-  }
+    if (req.method === 'DELETE') {
+      await redis('DEL', 'push:subscription');
+      return res.json({ ok: true });
+    }
 
-  return res.status(405).end();
+    return res.status(405).end();
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
 }
