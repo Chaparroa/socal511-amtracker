@@ -78,8 +78,8 @@
       gap: 10px;
     }
 
-    #notify-btn {
-      display: none; /* shown by JS when push is supported */
+    #notify-btn, #favorite-btn {
+      display: none; /* notify-btn: shown by JS when push is supported. favorite-btn: shown once trainNumber is known */
       align-items: center;
       background: none;
       border: 1.5px solid var(--border);
@@ -98,7 +98,12 @@
       border-color: var(--yellow);
     }
 
-    #notify-btn:active { opacity: 0.65; }
+    #favorite-btn.active {
+      color: var(--red);
+      border-color: var(--red);
+    }
+
+    #notify-btn:active, #favorite-btn:active { opacity: 0.65; }
 
     /* ── Bottom sheet (notification onboarding) ── */
     .sheet-overlay {
@@ -516,6 +521,7 @@
   <a class="wordmark" href="/">SoCal 511 <span>·</span> Amtracker</a>
   <span id="train-title">—</span>
   <div class="header-right">
+    <button id="favorite-btn" title="Save this train to your home page" aria-label="Save train to My Trains">♡</button>
     <button id="notify-btn" title="Tap to get delay alerts" aria-label="Enable delay notifications">🔔</button>
   </div>
 </header>
@@ -617,6 +623,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { STATION_COORDS } from '/js/config.js';
+  import { isFavorite, toggleFavorite, addFavorite } from '/js/favorites.js';
 
   // ── Parse URL ──────────────────────────────────────────────────
   const pathParts   = window.location.pathname.split('/');
@@ -625,6 +632,24 @@
   const focusStation = (params.get('station') || '').toUpperCase();
 
   document.title = `Train ${trainNumber} · Amtracker`;
+
+  // ── Favorites ─────────────────────────────────────────────────
+  const favoriteBtn = document.getElementById('favorite-btn');
+  favoriteBtn.style.display = 'flex';
+  let currentTrainInfo = { train: trainNumber, station: focusStation };
+
+  function setFavoriteState(active) {
+    favoriteBtn.textContent = active ? '♥' : '♡';
+    favoriteBtn.title = active ? 'Saved — tap to remove from My Trains' : 'Save this train to your home page';
+    favoriteBtn.setAttribute('aria-label', active ? 'Remove train from My Trains' : 'Save train to My Trains');
+    favoriteBtn.classList.toggle('active', active);
+  }
+
+  setFavoriteState(isFavorite(trainNumber, focusStation));
+
+  favoriteBtn.addEventListener('click', () => {
+    setFavoriteState(toggleFavorite(currentTrainInfo));
+  });
 
   // ── Map setup ─────────────────────────────────────────────────
   const map = L.map('map', { zoomControl: true }).setView([34.25, -118.5], 9);
@@ -694,6 +719,14 @@
     // and usually more accurate than the last-reported stop since delays
     // tend to grow en route). Fall back to the last reported station when
     // there's no focus station (e.g. generic train lookup).
+    currentTrainInfo = {
+      train: trainNumber,
+      station: focusStation,
+      stationName: myStop?.name || '',
+      routeName: train.routeName || '',
+    };
+    if (isFavorite(trainNumber, focusStation)) addFavorite(currentTrainInfo); // refresh saved snapshot
+
     const lastStation = [...stations].reverse().find(s => s.arr || s.dep);
     const lastStationDelay = lastStation
       ? Math.max(delayMin(lastStation.arr, lastStation.schArr), delayMin(lastStation.dep, lastStation.schDep))

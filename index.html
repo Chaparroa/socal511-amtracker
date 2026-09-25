@@ -193,10 +193,28 @@
       color: var(--muted);
     }
 
-    .train-card .arrow {
+    .fav-toggle {
       margin-left: auto;
-      color: var(--muted);
+      background: none;
+      border: none;
       font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 8px;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+
+    .remove-fav { color: var(--red); }
+
+    .add-fav { color: var(--muted); }
+    .add-fav:hover { color: var(--red); }
+
+    #favorites-empty {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 20px;
     }
 
     /* ── Search form ── */
@@ -275,15 +293,10 @@
 
 <main>
 
-  <p class="section-label">My Morning Train</p>
-  <a class="train-card" href="/train/770?station=CWT">
-    <div class="train-badge">770</div>
-    <div class="train-info">
-      <h3>Train 770</h3>
-      <p>Chatsworth (CWT) → Los Angeles</p>
-    </div>
-    <span class="arrow">›</span>
-  </a>
+  <p class="section-label">My Trains</p>
+  <div id="favorites-list"></div>
+  <p id="favorites-empty" style="display:none;">No trains saved yet. Look up a train below, then tap the heart on its page to pin it here.</p>
+  <div id="suggested-wrap"></div>
 
   <div class="lookup-form">
     <p class="section-label">Look Up Another Train</p>
@@ -301,7 +314,52 @@
   <p style="margin-top:6px"><a href="https://socal511-transit.vercel.app">SoCal 511 Transit</a> · SoCal 511 Amtracker</p>
 </footer>
 
-<script>
+<script type="module">
+  import { getFavorites, isFavorite, addFavorite, removeFavorite } from '/js/favorites.js';
+
+  const SUGGESTED = { train: '770', station: 'CWT', stationName: 'Chatsworth', routeName: 'Pacific Surfliner' };
+
+  function cardHTML(fav, removable) {
+    const subtitle = [fav.stationName ? `${fav.stationName} (${fav.station})` : fav.station, fav.routeName]
+      .filter(Boolean).join(' · ') || 'Amtrak';
+    const toggle = removable
+      ? `<button class="fav-toggle remove-fav" data-train="${fav.train}" data-station="${fav.station}" aria-label="Remove Train ${fav.train} from My Trains" title="Remove from My Trains">♥</button>`
+      : `<button class="fav-toggle add-fav" data-train="${fav.train}" data-station="${fav.station}" data-stationname="${fav.stationName}" data-route="${fav.routeName}" aria-label="Save Train ${fav.train} to My Trains" title="Save to My Trains">♡</button>`;
+    return `
+      <a class="train-card" href="/train/${fav.train}${fav.station ? '?station=' + fav.station : ''}">
+        <div class="train-badge">${fav.train}</div>
+        <div class="train-info">
+          <h3>Train ${fav.train}</h3>
+          <p>${subtitle}</p>
+        </div>
+        ${toggle}
+      </a>`;
+  }
+
+  function render() {
+    const favs = getFavorites().sort((a, b) => a.addedAt - b.addedAt);
+    const listEl     = document.getElementById('favorites-list');
+    const emptyEl    = document.getElementById('favorites-empty');
+    const suggestEl  = document.getElementById('suggested-wrap');
+
+    listEl.innerHTML  = favs.map(f => cardHTML(f, true)).join('');
+    emptyEl.style.display = favs.length === 0 ? 'block' : 'none';
+    suggestEl.innerHTML = isFavorite(SUGGESTED.train, SUGGESTED.station) ? '' : cardHTML(SUGGESTED, false);
+
+    listEl.querySelectorAll('.remove-fav').forEach(b => b.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      removeFavorite(b.dataset.train, b.dataset.station);
+      render();
+    }));
+    suggestEl.querySelectorAll('.add-fav').forEach(b => b.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      addFavorite({ train: b.dataset.train, station: b.dataset.station, stationName: b.dataset.stationname, routeName: b.dataset.route });
+      render();
+    }));
+  }
+
+  render();
+
   const input = document.getElementById('train-input');
   const btn   = document.getElementById('go-btn');
 
