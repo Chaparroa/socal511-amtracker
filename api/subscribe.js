@@ -1,32 +1,33 @@
-async function redis(cmd, ...args) {
-  const r = await fetch(process.env.UPSTASH_REDIS_REST_KV_REST_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify([cmd, ...args]),
-  });
-  if (!r.ok) throw new Error(`Redis REST error ${r.status}`);
-  const { result } = await r.json();
-  return result;
-}
+import { redis, redisConfigured } from '../lib/redis.js';
+import { deviceId } from '../lib/device.js';
+
+const SUB_TTL = 60 * 60 * 24 * 90; // 90 days
 
 export default async function handler(req, res) {
-  if (!process.env.UPSTASH_REDIS_REST_KV_REST_API_URL) {
+  if (!redisConfigured()) {
     return res.status(503).json({ error: 'Push storage not configured (UPSTASH_REDIS_REST_KV_REST_API_URL missing)' });
   }
 
   try {
     if (req.method === 'POST') {
-      const sub = req.body;
-      if (!sub?.endpoint) return res.status(400).json({ error: 'Invalid subscription object' });
-      await redis('SET', 'push:subscription', JSON.stringify(sub));
+      const { subscription, watches } = req.body || {};
+      if (!subscription?.endpoint) return res.status(400).json({ error: 'Invalid subscription object' });
+
+      const id  = deviceId(subscription.endpoint);
+      const doc = { subscription, watches: Array.isArray(watches) ? watches : [], updatedAt: Date.now() };
+
+      await redis('SET', `push:sub:${id}`, JSON.stringify(doc), 'EX', SUB_TTL);
+      await redis('SADD', 'push:sub:index', id);
       return res.json({ ok: true });
     }
 
     if (req.method === 'DELETE') {
-      await redis('DEL', 'push:subscription');
+      const { endpoint } = req.body || {};
+      if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
+
+      const id = deviceId(endpoint);
+      await redis('DEL', `push:sub:${id}`);
+      await redis('SREM', 'push:sub:index', id);
       return res.json({ ok: true });
     }
 

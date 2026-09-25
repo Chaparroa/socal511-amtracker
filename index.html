@@ -193,19 +193,30 @@
       color: var(--muted);
     }
 
-    .fav-toggle {
+    .card-actions {
       margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+
+    .fav-toggle {
       background: none;
       border: none;
       font-size: 20px;
       line-height: 1;
       cursor: pointer;
       padding: 8px;
-      flex-shrink: 0;
       transition: color 0.15s;
     }
 
     .remove-fav { color: var(--red); }
+
+    .fav-bell {
+      font-size: 13px;
+      opacity: 0.8;
+    }
 
     #favorites-empty {
       font-size: 14px;
@@ -323,7 +334,10 @@
           <h3>Train ${fav.train}</h3>
           <p>${subtitle}</p>
         </div>
-        <button class="fav-toggle remove-fav" data-train="${fav.train}" data-station="${fav.station}" aria-label="Remove Train ${fav.train} from My Trains" title="Remove from My Trains">♥</button>
+        <div class="card-actions">
+          ${fav.notify ? '<span class="fav-bell" title="Delay alerts on">🔔</span>' : ''}
+          <button class="fav-toggle remove-fav" data-train="${fav.train}" data-station="${fav.station}" aria-label="Remove Train ${fav.train} from My Trains" title="Remove from My Trains">♥</button>
+        </div>
       </a>`;
   }
 

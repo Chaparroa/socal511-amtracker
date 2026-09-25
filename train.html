@@ -372,6 +372,12 @@
     .stop-row.highlight { background: rgba(0,119,200,0.12); }
     .stop-row.passed    { opacity: 0.4; }
 
+    .stop-row.pickable { cursor: pointer; }
+    .stop-row.pickable:hover, .stop-row.pickable:focus-visible {
+      background: rgba(255,255,255,0.05);
+      outline: none;
+    }
+
     .stop-dot {
       width: 10px;
       height: 10px;
@@ -623,7 +629,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { STATION_COORDS } from '/js/config.js';
-  import { isFavorite, toggleFavorite, addFavorite } from '/js/favorites.js';
+  import { isFavorite, toggleFavorite, addFavorite, isNotifying, setNotify, getNotifyList } from '/js/favorites.js';
 
   // ── Parse URL ──────────────────────────────────────────────────
   const pathParts   = window.location.pathname.split('/');
@@ -647,8 +653,17 @@
 
   setFavoriteState(isFavorite(trainNumber, focusStation));
 
+  // Reassigned once push capability is confirmed, further down — pushes this
+  // device's current notify list to the server. Calling it before that point
+  // (e.g. an early favorite-toggle click) is a harmless no-op.
+  let syncWatches = async () => {};
+
   favoriteBtn.addEventListener('click', () => {
-    setFavoriteState(toggleFavorite(currentTrainInfo));
+    const nowFav = toggleFavorite(currentTrainInfo);
+    setFavoriteState(nowFav);
+    // Unfavoriting drops any notify flag with it — reflect that in the bell too.
+    setNotifyState(nowFav && isNotifying(trainNumber, focusStation));
+    syncWatches();
   });
 
   // ── Map setup ─────────────────────────────────────────────────
@@ -815,6 +830,17 @@
       row.appendChild(dot);
       row.appendChild(nameWrap);
       row.appendChild(timeWrap);
+
+      if (!isMyStop) {
+        row.classList.add('pickable');
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-label', `Set ${stop.name || stop.code} as your station`);
+        const setStation = () => { window.location.href = `/train/${trainNumber}?station=${stop.code}`; };
+        row.addEventListener('click', setStation);
+        row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStation(); } });
+      }
+
       list.appendChild(row);
     });
 
@@ -967,8 +993,8 @@
 
   function setNotifyState(active) {
     notifyBtn.textContent = '🔔';
-    notifyBtn.title       = active ? 'Notifications on — tap to disable' : 'Tap to get delay alerts';
-    notifyBtn.setAttribute('aria-label', active ? 'Disable notifications' : 'Enable delay notifications');
+    notifyBtn.title       = active ? 'Alerts on for this train — tap to disable' : 'Tap to get delay alerts for this train';
+    notifyBtn.setAttribute('aria-label', active ? 'Disable alerts for this train' : 'Enable delay alerts for this train');
     notifyBtn.classList.toggle('active', active);
   }
 
@@ -1004,57 +1030,81 @@
     // Push is available (iOS PWA or Android/desktop) — normal subscription flow
     const reg      = await navigator.serviceWorker.register('/sw.js');
     const existing = await reg.pushManager.getSubscription();
-    setNotifyState(!!existing);
+    setNotifyState(!!existing && isNotifying(trainNumber, focusStation));
 
-    // Re-POST subscription to Redis on every load — self-heals if Redis lost it
-    if (existing) {
+    // Pushes this device's current subscription + full notify list to the
+    // server. Called on every load (self-heals if Redis lost it) and any
+    // time the notify list changes for any train — a full-replace sync, not
+    // a per-train patch, so the server never drifts from localStorage.
+    syncWatches = async () => {
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
       fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(existing),
+        body: JSON.stringify({ subscription: sub, watches: getNotifyList() }),
       });
-    }
+    };
+
+    if (existing) syncWatches();
 
     notifyBtn.addEventListener('click', async () => {
-      const isActive = notifyBtn.classList.contains('active');
-
-      if (isActive) {
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) await sub.unsubscribe();
-        await fetch('/api/subscribe', { method: 'DELETE' });
+      // Turning OFF only clears this train+station's flag — other trains this
+      // device is watching must keep working, so we never unsubscribe here.
+      if (isNotifying(trainNumber, focusStation)) {
+        setNotify(trainNumber, focusStation, false);
         setNotifyState(false);
+        syncWatches();
         return;
       }
 
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') {
-        alert('Notifications are blocked. Enable them in your browser/OS settings.');
-        return;
+      // Turning ON — reuse an existing push subscription if this device
+      // already has one (e.g. alerts are on for a different train already).
+      let sub = await reg.pushManager.getSubscription();
+      let createdNew = false;
+
+      if (!sub) {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          alert('Notifications are blocked. Enable them in your browser/OS settings.');
+          return;
+        }
+
+        const keyRes = await fetch('/api/push-key');
+        if (!keyRes.ok) { alert('Notification service not yet configured.'); return; }
+        const { key } = await keyRes.json();
+
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlB64ToUint8(key),
+        });
+        createdNew = true;
       }
 
-      const keyRes = await fetch('/api/push-key');
-      if (!keyRes.ok) { alert('Notification service not yet configured.'); return; }
-      const { key } = await keyRes.json();
-
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlB64ToUint8(key),
-      });
+      const watches = [...getNotifyList(), {
+        train: trainNumber, station: focusStation,
+        stationName: currentTrainInfo.stationName, routeName: currentTrainInfo.routeName,
+      }];
 
       const saveRes = await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sub),
+        body: JSON.stringify({ subscription: sub, watches }),
       });
 
       if (!saveRes.ok) {
         // Subscribed in the browser but the server couldn't store it — don't
-        // show "active" or alerts will silently never arrive.
-        await sub.unsubscribe();
+        // show "active" or alerts will silently never arrive. Only unwind the
+        // browser-level subscription if we just created it; if it already
+        // existed, other trains may depend on it.
+        if (createdNew) await sub.unsubscribe();
         alert('Could not save notification settings. Please try again.');
         return;
       }
 
+      setNotify(trainNumber, focusStation, true, {
+        stationName: currentTrainInfo.stationName, routeName: currentTrainInfo.routeName,
+      });
       setNotifyState(true);
     });
   }

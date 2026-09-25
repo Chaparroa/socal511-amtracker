@@ -26,10 +26,17 @@ export function isFavorite(train, station) {
 }
 
 // Adds, or refreshes the snapshot if this train/station is already saved.
+// Preserves notify/addedAt from any existing entry — callers only pass display fields.
 export function addFavorite({ train, station, stationName, routeName }) {
   const st = station || '';
+  const prev = getFavorites().find(f => f.train === train && f.station === st);
   const list = getFavorites().filter(f => !(f.train === train && f.station === st));
-  list.push({ train, station: st, stationName: stationName || '', routeName: routeName || '', addedAt: Date.now() });
+  list.push({
+    train, station: st,
+    stationName: stationName || '', routeName: routeName || '',
+    notify: prev?.notify || false,
+    addedAt: prev?.addedAt || Date.now(),
+  });
   saveFavorites(list);
 }
 
@@ -45,4 +52,28 @@ export function toggleFavorite(info) {
   }
   addFavorite(info);
   return true;
+}
+
+export function isNotifying(train, station) {
+  const st = station || '';
+  const f = getFavorites().find(f => f.train === train && f.station === st);
+  return !!f?.notify;
+}
+
+// Turning notify on implicitly favorites the train (can't alert on something not tracked).
+// Turning it off just clears the flag — the favorite itself stays.
+export function setNotify(train, station, on, info = {}) {
+  const st = station || '';
+  if (on && !isFavorite(train, st)) addFavorite({ train, station: st, ...info });
+  const list = getFavorites().map(f =>
+    (f.train === train && f.station === st) ? { ...f, notify: on } : f
+  );
+  saveFavorites(list);
+}
+
+// The notify:true subset, shaped for what /api/subscribe expects.
+export function getNotifyList() {
+  return getFavorites()
+    .filter(f => f.notify)
+    .map(({ train, station, stationName, routeName }) => ({ train, station, stationName, routeName }));
 }

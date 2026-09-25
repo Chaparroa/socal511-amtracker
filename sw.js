@@ -1,4 +1,4 @@
-const TRACKER_URL = 'https://socal511-amtracker.vercel.app/train/770?station=CWT';
+const TRACKER_URL = 'https://socal511-amtracker.vercel.app/';
 
 self.addEventListener('push', event => {
   if (!event.data) return;
