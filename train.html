@@ -640,6 +640,27 @@
   const params      = new URLSearchParams(window.location.search);
   const focusStation = (params.get('station') || '').toUpperCase();
 
+  // ── Temporary debug overlay ──────────────────────────────────────
+  // Visit with &debug=1 in the URL to see exactly what the notification
+  // flow is doing, on-device, without needing a cable/Web Inspector.
+  // Safe to leave in — invisible and inert unless that param is present.
+  const debugOn = params.get('debug') === '1';
+  let debugEl = null;
+  if (debugOn) {
+    debugEl = document.createElement('pre');
+    debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:40vh;overflow-y:auto;' +
+      'background:rgba(0,0,0,0.9);color:#0f0;font-size:11px;line-height:1.4;padding:8px;margin:0;' +
+      'z-index:9999;white-space:pre-wrap;word-break:break-all;';
+    document.body.appendChild(debugEl);
+  }
+  function debugLog(msg) {
+    if (!debugOn) return;
+    const line = `[${new Date().toLocaleTimeString('en-US', { hour12: false })}] ${msg}`;
+    console.log(line);
+    debugEl.textContent += line + '\n';
+    debugEl.scrollTop = debugEl.scrollHeight;
+  }
+
   document.title = `Train ${trainNumber} · Amtracker`;
 
   // ── Favorites ─────────────────────────────────────────────────
@@ -1019,12 +1040,15 @@
   overlayEl.addEventListener('click', closeSheet);
 
   async function initNotifications() {
+    debugLog(`initNotifications: hasPush=${hasPush} isIOS=${isIOS} isStandalone=${isStandalone}`);
+
     // Show bell for iOS (so we can guide them) or any browser with push support
-    if (!hasPush && !isIOS) return;
+    if (!hasPush && !isIOS) { debugLog('bailing: no push support and not iOS'); return; }
     notifyBtn.style.display = 'flex';
 
     // iOS in regular Safari: bell tapping shows the install guide
     if (isIOS && !isStandalone) {
+      debugLog('iOS but not standalone — bell will only open the onboarding sheet');
       setNotifyState(false);
       notifyBtn.addEventListener('click', openSheet);
       return;
@@ -1032,7 +1056,9 @@
 
     // Push is available (iOS PWA or Android/desktop) — normal subscription flow
     const reg      = await navigator.serviceWorker.register('/sw.js');
+    debugLog('service worker registered: ' + reg.scope);
     const existing = await reg.pushManager.getSubscription();
+    debugLog('existing subscription on load: ' + (existing ? existing.endpoint : 'none'));
     setNotifyState(!!existing && isNotifying(trainNumber, focusStation));
 
     // Pushes this device's current subscription + full notify list to the
@@ -1041,17 +1067,26 @@
     // a per-train patch, so the server never drifts from localStorage.
     syncWatches = async () => {
       const sub = await reg.pushManager.getSubscription();
-      if (!sub) return;
-      fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: sub, watches: getNotifyList() }),
-      });
+      if (!sub) { debugLog('syncWatches: no subscription, skipping'); return; }
+      const watches = getNotifyList();
+      debugLog('syncWatches POSTing: ' + JSON.stringify(watches));
+      try {
+        const r = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub, watches }),
+        });
+        debugLog(`syncWatches response: ${r.status} ${await r.clone().text()}`);
+      } catch (err) {
+        debugLog('syncWatches FETCH THREW: ' + err.message);
+      }
     };
 
     if (existing) syncWatches();
 
     notifyBtn.addEventListener('click', async () => {
+      try {
+      debugLog('bell tapped, currently notifying=' + isNotifying(trainNumber, focusStation));
       // Turning OFF only clears this train+station's flag — other trains this
       // device is watching must keep working, so we never unsubscribe here.
       if (isNotifying(trainNumber, focusStation)) {
@@ -1067,13 +1102,16 @@
       let createdNew = false;
 
       if (!sub) {
+        debugLog('no existing subscription — requesting permission');
         const perm = await Notification.requestPermission();
+        debugLog('permission result: ' + perm);
         if (perm !== 'granted') {
           alert('Notifications are blocked. Enable them in your browser/OS settings.');
           return;
         }
 
         const keyRes = await fetch('/api/push-key');
+        debugLog('push-key response: ' + keyRes.status);
         if (!keyRes.ok) { alert('Notification service not yet configured.'); return; }
         const { key } = await keyRes.json();
 
@@ -1081,19 +1119,24 @@
           userVisibleOnly: true,
           applicationServerKey: urlB64ToUint8(key),
         });
+        debugLog('pushManager.subscribe() succeeded: ' + sub.endpoint);
         createdNew = true;
+      } else {
+        debugLog('reusing existing subscription: ' + sub.endpoint);
       }
 
       const watches = [...getNotifyList(), {
         train: trainNumber, station: focusStation,
         stationName: currentTrainInfo.stationName, routeName: currentTrainInfo.routeName,
       }];
+      debugLog('POSTing watches: ' + JSON.stringify(watches));
 
       const saveRes = await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subscription: sub, watches }),
       });
+      debugLog(`save response: ${saveRes.status} ${await saveRes.clone().text()}`);
 
       if (!saveRes.ok) {
         // Subscribed in the browser but the server couldn't store it — don't
@@ -1109,6 +1152,10 @@
         stationName: currentTrainInfo.stationName, routeName: currentTrainInfo.routeName,
       });
       setNotifyState(true);
+      debugLog('done — notify enabled locally and saved');
+      } catch (err) {
+        debugLog('BELL CLICK HANDLER THREW: ' + err.message);
+      }
     });
   }
 
