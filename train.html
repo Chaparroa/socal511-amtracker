@@ -273,6 +273,74 @@
       color: rgba(255,255,255,0.7);
     }
 
+    /* ── Station chip (which stop the status is about) ── */
+    #station-bar {
+      display: none; /* shown once stops are loaded */
+      padding: 10px 16px;
+      background: var(--black);
+      border-bottom: 1px solid var(--border);
+    }
+
+    #station-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1.5px dashed var(--yellow);
+      background: none;
+      color: var(--yellow);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #station-chip.set {
+      border-style: solid;
+      border-color: var(--border);
+      background: var(--surface);
+      color: #fff;
+    }
+
+    #station-chip .chev { font-size: 11px; opacity: 0.7; }
+    #station-chip:active { opacity: 0.65; }
+
+    /* Stop picker sheet */
+    #station-sheet { max-height: 80vh; flex-direction: column; padding-bottom: 24px; }
+    #station-sheet .sheet-subtitle { margin-bottom: 12px; }
+
+    #station-options {
+      list-style: none;
+      overflow-y: auto;
+      margin: 0 -20px;
+      border-top: 1px solid var(--border);
+    }
+
+    #station-options button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      padding: 10px 20px;
+      background: none;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #station-options button:hover { background: rgba(255,255,255,0.05); }
+    #station-options button.current { background: rgba(0,119,200,0.12); }
+    #station-options button.passed { color: var(--muted); }
+    #station-options .opt-name { flex: 1; font-weight: 500; }
+    #station-options .opt-time { font-family: 'interstate', sans-serif; font-size: 13px; font-weight: 700; color: var(--muted); }
+
     /* ── Main layout ── */
     .layout {
       display: grid;
@@ -412,6 +480,10 @@
     /* ── Map ── */
     #map {
       background: #e8e0d8;
+      /* Contain Leaflet's z-index:400+ panes so they can't paint over the
+         sticky header or the bottom sheets. */
+      position: relative;
+      z-index: 0;
     }
 
     /* ── Loading / Error states ── */
@@ -535,6 +607,12 @@
   </div>
 </header>
 
+<div id="station-bar">
+  <button id="station-chip" aria-haspopup="dialog">
+    <span aria-hidden="true">📍</span><span id="station-chip-label">where are you getting on?</span><span class="chev" aria-hidden="true">▾</span>
+  </button>
+</div>
+
 <div id="alert-band"></div>
 
 <div id="status-band">
@@ -629,6 +707,14 @@
   <button class="sheet-btn" id="sheet-close">Got it</button>
 </div>
 
+<div class="bottom-sheet" id="station-sheet" role="dialog" aria-modal="true" aria-labelledby="station-sheet-title">
+  <div class="sheet-handle"></div>
+  <p class="sheet-eyebrow" id="station-sheet-eyebrow">your stop</p>
+  <h3 class="sheet-title" id="station-sheet-title">where are you getting on?</h3>
+  <p class="sheet-subtitle" id="station-sheet-subtitle">we'll show delays for that stop instead of the whole trip.</p>
+  <ul id="station-options"></ul>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { STATION_COORDS } from '/js/config.js';
@@ -675,6 +761,15 @@
     favoriteBtn.classList.toggle('active', active);
   }
 
+  // Arriving from the stop picker after tapping the heart with no station set
+  // (?fav=1) — finish the save the rider started. stationName gets filled in
+  // on first render, which refreshes the snapshot of any saved favorite.
+  if (params.get('fav') === '1' && focusStation) {
+    addFavorite(currentTrainInfo);
+    params.delete('fav');
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
+
   setFavoriteState(isFavorite(trainNumber, focusStation));
 
   // Reassigned once push capability is confirmed, further down — pushes this
@@ -682,7 +777,73 @@
   // (e.g. an early favorite-toggle click) is a harmless no-op.
   let syncWatches = async () => {};
 
+  // ── Station picker ────────────────────────────────────────────
+  // Delays only mean something relative to a stop, so the page asks for one
+  // up front (chip under the header) and before saving or alerting.
+  const stationBar   = document.getElementById('station-bar');
+  const stationChip  = document.getElementById('station-chip');
+  const stationSheet = document.getElementById('station-sheet');
+  let latestStops    = [];
+
+  function stationUrl(code, extra = {}) {
+    const p = new URLSearchParams();
+    if (code) p.set('station', code);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (debugOn) p.set('debug', '1');
+    const qs = p.toString();
+    return `/train/${trainNumber}${qs ? '?' + qs : ''}`;
+  }
+
+  const PICKER_COPY = {
+    pick:   { eyebrow: 'your stop', title: 'where are you getting on?', sub: "we'll show delays for that stop instead of the whole trip." },
+    fav:    { eyebrow: 'save this train', title: 'which stop is yours?', sub: "we'll save the train at that stop so delays are about your trip." },
+    notify: { eyebrow: 'delay alerts', title: 'which stop should we watch?', sub: "pick your stop, then tap 🔔 again to turn on alerts." },
+  };
+
+  function openStationSheet(mode = 'pick') {
+    const copy = PICKER_COPY[mode];
+    document.getElementById('station-sheet-eyebrow').textContent  = copy.eyebrow;
+    document.getElementById('station-sheet-title').textContent    = copy.title;
+    document.getElementById('station-sheet-subtitle').textContent = copy.sub;
+
+    const list = document.getElementById('station-options');
+    list.innerHTML = '';
+    if (latestStops.length === 0) {
+      list.innerHTML = '<li style="padding:16px 20px;color:var(--muted)">loading stops…</li>';
+    }
+    latestStops.forEach(stop => {
+      const passed = stop.status === 'Departed' || stop.status === 'Arrived';
+      const li  = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.className = `${stop.code === focusStation ? 'current' : ''}${passed ? ' passed' : ''}`;
+      btn.innerHTML = `<span class="opt-name"></span><span class="opt-time">${fmtTime(stop.schArr || stop.schDep)}</span>`;
+      btn.querySelector('.opt-name').textContent = stop.name || stop.code;
+      btn.addEventListener('click', () => {
+        if (stop.code === focusStation && mode === 'pick') { closeStationSheet(); return; }
+        window.location.href = stationUrl(stop.code, mode === 'fav' ? { fav: '1' } : {});
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+
+    stationSheet.style.display = 'flex';
+    overlayEl.style.display = 'block';
+    requestAnimationFrame(() => stationSheet.classList.add('open'));
+  }
+
+  function closeStationSheet() {
+    stationSheet.classList.remove('open');
+    setTimeout(() => {
+      stationSheet.style.display = 'none';
+      overlayEl.style.display = 'none';
+    }, 300);
+  }
+
+  stationChip.addEventListener('click', () => openStationSheet('pick'));
+
   favoriteBtn.addEventListener('click', () => {
+    // A favorite is a train *at a stop* — without one, ask first.
+    if (!focusStation && !isFavorite(trainNumber, '')) { openStationSheet('fav'); return; }
     const nowFav = toggleFavorite(currentTrainInfo);
     setFavoriteState(nowFav);
     // Unfavoriting drops any notify flag with it — reflect that in the bell too.
@@ -766,13 +927,24 @@
     };
     if (isFavorite(trainNumber, focusStation)) addFavorite(currentTrainInfo); // refresh saved snapshot
 
-    const lastStation = [...stations].reverse().find(s => s.arr || s.dep);
-    const lastStationDelay = lastStation
-      ? Math.max(delayMin(lastStation.arr, lastStation.schArr), delayMin(lastStation.dep, lastStation.schDep))
-      : 0;
-    const overallDelay = myStop
-      ? delayMin(myStop.arr, myStop.schArr)
-      : lastStationDelay;
+    // No stop picked: report how the train is doing *right now* — the delay
+    // at the last stop it actually passed. Every stop has an estimated arr,
+    // so we have to go by status; picking "last stop with an arr" lands on
+    // the final destination, whose padded schedule makes a late train look
+    // early (770 was +35 at Chatsworth but "4 min early" into San Diego).
+    const passedStops = stations.filter(s => s.status === 'Departed' || s.status === 'Arrived');
+    const lastPassed  = passedStops[passedStops.length - 1];
+    let currentDelay  = 0;
+    let asOf          = '';
+    if (lastPassed) {
+      currentDelay = Math.max(delayMin(lastPassed.arr, lastPassed.schArr), delayMin(lastPassed.dep, lastPassed.schDep));
+      asOf = ` · as of ${lastPassed.name || lastPassed.code}`;
+    } else if (stations[0]) {
+      currentDelay = delayMin(stations[0].dep, stations[0].schDep);
+      asOf = ` · hasn't left ${stations[0].name || stations[0].code} yet`;
+    }
+    const overallDelay = myStop ? delayMin(myStop.arr, myStop.schArr) : currentDelay;
+    const where        = myStop ? '' : asOf;
 
     const pill   = document.getElementById('status-pill');
     const detail = document.getElementById('status-detail');
@@ -780,16 +952,24 @@
     if (overallDelay > 5) {
       pill.className  = 'status-pill delayed';
       pill.textContent = `+${overallDelay} min`;
-      detail.textContent = `Train is running late`;
+      detail.textContent = `Train is running late${where}`;
     } else if (overallDelay < -1) {
       pill.className  = 'status-pill on-time';
       pill.textContent = 'Early';
-      detail.textContent = `${Math.abs(overallDelay)} min ahead of schedule`;
+      detail.textContent = `${Math.abs(overallDelay)} min ahead of schedule${where}`;
     } else {
       pill.className  = 'status-pill on-time';
       pill.textContent = 'On Time';
-      detail.textContent = 'Running on schedule';
+      detail.textContent = `Running on schedule${where}`;
     }
+
+    // Station chip
+    latestStops = stations;
+    stationBar.style.display = 'block';
+    stationChip.classList.toggle('set', !!myStop);
+    document.getElementById('station-chip-label').textContent =
+      myStop ? `your stop: ${myStop.name || myStop.code}` : 'where are you getting on?';
+    stationChip.setAttribute('aria-label', myStop ? `Your stop is ${myStop.name || myStop.code}. Change stop` : 'Pick your stop');
 
     // Alert band
     const alertBand = document.getElementById('alert-band');
@@ -860,7 +1040,7 @@
         row.tabIndex = 0;
         row.setAttribute('role', 'button');
         row.setAttribute('aria-label', `Set ${stop.name || stop.code} as your station`);
-        const setStation = () => { window.location.href = `/train/${trainNumber}?station=${stop.code}`; };
+        const setStation = () => { window.location.href = stationUrl(stop.code); };
         row.addEventListener('click', setStation);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStation(); } });
       }
@@ -934,6 +1114,7 @@
     document.getElementById('main-layout').style.display = 'none';
     document.getElementById('error-msg').style.display   = 'none';
     document.getElementById('not-active').style.display  = 'block';
+    stationBar.style.display = 'none'; // no stop list to pick from until it runs
     document.getElementById('not-active-num').textContent = `Train ${trainNumber}`;
     document.getElementById('last-updated').textContent =
       `Checked ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}`;
@@ -1037,7 +1218,10 @@
   }
 
   document.getElementById('sheet-close').addEventListener('click', closeSheet);
-  overlayEl.addEventListener('click', closeSheet);
+  overlayEl.addEventListener('click', () => {
+    if (stationSheet.classList.contains('open')) closeStationSheet();
+    else closeSheet();
+  });
 
   async function initNotifications() {
     debugLog(`initNotifications: hasPush=${hasPush} isIOS=${isIOS} isStandalone=${isStandalone}`);
@@ -1086,6 +1270,8 @@
 
     notifyBtn.addEventListener('click', async () => {
       try {
+      // Alerts are computed against a stop — without one, ask first.
+      if (!focusStation) { openStationSheet('notify'); return; }
       debugLog('bell tapped, currently notifying=' + isNotifying(trainNumber, focusStation));
       // Turning OFF only clears this train+station's flag — other trains this
       // device is watching must keep working, so we never unsubscribe here.
