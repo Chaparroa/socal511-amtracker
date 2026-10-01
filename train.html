@@ -240,8 +240,9 @@
       font-weight: 700;
       font-size: 13px;
       letter-spacing: 0.04em;
-      padding: 6px 16px;
+      padding: 8px 16px;
       text-align: center;
+      line-height: 1.4;
     }
 
     /* ── Status band ── */
@@ -896,6 +897,53 @@
     return Math.round((new Date(estIso) - new Date(schIso)) / 60000);
   }
 
+  // Delay at a stop the train has already passed — the worse of arr and dep,
+  // since a train can arrive on time and then sit.
+  function passedDelay(stop) {
+    return Math.max(delayMin(stop.arr, stop.schArr), delayMin(stop.dep, stop.schDep));
+  }
+
+  // Shown only when there's something worth saying: running late, a delay
+  // that's changing, or Amtrak flagging a disruption.
+  function renderAlertBand(train, stations, passedStops, currentDelay) {
+    const band = document.getElementById('alert-band');
+    const lines = [];
+
+    if ((train.statusMsg || '').trim()) lines.push(`Amtrak says: ${train.statusMsg.trim().toLowerCase()}`);
+
+    if (passedStops.length > 0 && currentDelay > 5) {
+      const atStation = stations.find(s => s.status === 'Station');
+      const next      = stations.find(s => s.status !== 'Departed' && s.status !== 'Arrived');
+      const nextName  = next ? (next.name || next.code) : '';
+      let motion;
+      if (atStation)                 motion = `at ${atStation.name || atStation.code}`;
+      else if (train.velocity >= 1)  motion = 'moving';
+      else                           motion = nextName ? `stopped before ${nextName}` : 'stopped';
+      const asOf = train.lastValTS ? ` as of ${fmtTime(train.lastValTS)}` : '';
+      lines.push(`${motion} · about ${currentDelay} min late${asOf}`);
+    }
+
+    // Trend over the last few passed stops — enough of a window to smooth
+    // out single-stop noise, recent enough to reflect what's happening now.
+    const recent = passedStops.slice(-4);
+    if (recent.length >= 2) {
+      const first = recent[0], last = recent[recent.length - 1];
+      const d1 = passedDelay(first), d2 = passedDelay(last);
+      const fmt = d => (d >= 0 ? `+${d}` : `${d}`);
+      const span = `${fmt(d1)} at ${first.name || first.code} → ${fmt(d2)} at ${last.name || last.code}`;
+      if (d2 - d1 >= 5)                lines.push(`delay growing: ${span}`);
+      else if (d1 - d2 >= 5 && d1 > 5) lines.push(`making up time: ${span}`);
+    }
+
+    band.style.display = lines.length ? 'block' : 'none';
+    band.innerHTML = '';
+    lines.forEach(l => {
+      const div = document.createElement('div');
+      div.textContent = l;
+      band.appendChild(div);
+    });
+  }
+
   // ── Render ────────────────────────────────────────────────────
   function render(data) {
     document.getElementById('loading').style.display = 'none';
@@ -937,7 +985,7 @@
     let currentDelay  = 0;
     let asOf          = '';
     if (lastPassed) {
-      currentDelay = Math.max(delayMin(lastPassed.arr, lastPassed.schArr), delayMin(lastPassed.dep, lastPassed.schDep));
+      currentDelay = passedDelay(lastPassed);
       asOf = ` · as of ${lastPassed.name || lastPassed.code}`;
     } else if (stations[0]) {
       currentDelay = delayMin(stations[0].dep, stations[0].schDep);
@@ -971,14 +1019,11 @@
       myStop ? `your stop: ${myStop.name || myStop.code}` : 'where are you getting on?';
     stationChip.setAttribute('aria-label', myStop ? `Your stop is ${myStop.name || myStop.code}. Change stop` : 'Pick your stop');
 
-    // Alert band
-    const alertBand = document.getElementById('alert-band');
-    if (train.eventCode && train.eventCode !== 'OT') {
-      alertBand.style.display = 'block';
-      alertBand.textContent   = train.statusMsg || `Train ${trainNumber} is delayed`;
-    } else {
-      alertBand.style.display = 'none';
-    }
+    // Alert band — a plain-language "what's going on" line, built from the
+    // feed since amtraker carries none of Amtrak's written status messages
+    // (statusMsg is ' ' for nearly every Amtrak train; alerts is always []).
+    // Note eventCode is the next station's code, not an on-time flag.
+    renderAlertBand(train, stations, passedStops, currentDelay);
 
     // My station card
     if (myStop) {
@@ -1115,6 +1160,7 @@
     document.getElementById('error-msg').style.display   = 'none';
     document.getElementById('not-active').style.display  = 'block';
     stationBar.style.display = 'none'; // no stop list to pick from until it runs
+    document.getElementById('alert-band').style.display = 'none';
     document.getElementById('not-active-num').textContent = `Train ${trainNumber}`;
     document.getElementById('last-updated').textContent =
       `Checked ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}`;
